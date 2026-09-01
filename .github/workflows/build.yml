@@ -1,0 +1,83 @@
+name: Build Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.1.0)'
+        required: true
+        type: string
+      release:
+        description: 'Create GitHub release'
+        required: true
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            cross_compile: false
+          - arch: aarch64
+            runner: ubuntu-latest
+            cross_compile: true
+    
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y gcc make
+      
+      - name: Install cross-compilation tools
+        if: matrix.cross_compile
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+      
+      - name: Build
+        env:
+          CC: ${{ matrix.cross_compile && 'aarch64-linux-gnu-gcc' || 'gcc' }}
+        run: make
+      
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp build/xpt dist/xpt
+          cp build/xman dist/xman
+          chmod +x dist/*
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: xbps-tools-${{ matrix.arch }}
+          path: dist/*
+      
+      - name: Create release archive
+        if: inputs.release
+        env:
+          TAG: ${{ inputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          cd dist
+          tar -czf "../xbps-tools-${TAG}-linux-${ARCH}.tar.gz" *
+          cd ..
+      
+      - name: Create GitHub Release
+        if: inputs.release && matrix.arch == 'x86_64'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          generate_release_notes: true
+      
+      - name: Upload release asset
+        if: inputs.release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: xbps-tools-${{ inputs.tag }}-linux-${{ matrix.arch }}.tar.gz
